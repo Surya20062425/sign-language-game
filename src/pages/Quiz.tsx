@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { CheckCircle, XCircle, RotateCcw, TrendingUp } from 'lucide-react'
 import { quizQuestions } from '../data'
+import { QuizQuestion } from '../data/types'
 
 export function Quiz() {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
@@ -9,7 +10,7 @@ export function Quiz() {
   const [showResults, setShowResults] = useState(false)
   const [answered, setAnswered] = useState(false)
 
-  const currentQuestion = quizQuestions[currentQuestionIndex]
+  const currentQuestion: QuizQuestion = quizQuestions[currentQuestionIndex]
 
   const handleAnswerSelect = (answer: string) => {
     if (answered) return
@@ -115,7 +116,7 @@ export function Quiz() {
         </div>
 
         <div className="grid gap-3">
-          {currentQuestion.options.map((option, idx) => {
+          {currentQuestion.options.map((option: string, idx: number) => {
             const isSelected = selectedAnswer === option
             const isCorrect = option === currentQuestion.correctAnswer
             const getButtonClass = () => {

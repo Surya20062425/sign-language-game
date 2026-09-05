@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { Clock, User } from 'lucide-react'
 import { lessons } from '../data'
+import { Lesson } from '../data/types'
 
 export function Lessons() {
   return (
@@ -13,7 +14,7 @@ export function Lessons() {
       </div>
 
       <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {lessons.map((lesson) => (
+        {lessons.map((lesson: Lesson) => (
           <Link
             key={lesson.id}
             to={`/lessons/${lesson.id}`}

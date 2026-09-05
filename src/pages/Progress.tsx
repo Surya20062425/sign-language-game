@@ -1,9 +1,9 @@
 import { BookOpen, TrendingUp, Award, Calendar, CheckCircle } from 'lucide-react'
 import { lessons } from '../data'
+import { Lesson } from '../data/types'
 
 export function Progress() {
   const totalLessons = lessons.length
-  const totalSigns = lessons.reduce((acc, l) => acc + l.signs.length, 0)
 
   // Hardcoded progress for MVP demo
   const completedLessons = 3
@@ -65,7 +65,7 @@ export function Progress() {
       <div className="card">
         <h2 className="text-xl font-bold text-gray-900 mb-4">Lessons</h2>
         <div className="space-y-4">
-          {lessons.map((lesson) => {
+          {lessons.map((lesson: Lesson) => {
             const isCompleted = lesson.id === 'greetings' || lesson.id === 'everyday' || lesson.id === 'people'
             return (
               <div

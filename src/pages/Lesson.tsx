@@ -1,12 +1,13 @@
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { ArrowLeft, BookOpen, CheckCircle, Clock } from 'lucide-react'
-import { lessons, signs } from '../data'
+import { lessons } from '../data'
+import { Lesson as LessonType, Sign } from '../data/types'
 
 export function Lesson() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
 
-  const lesson = lessons.find((l) => l.id === id)
+  const lesson: LessonType | undefined = lessons.find((l: LessonType) => l.id === id)
 
   if (!lesson) {
     return (
@@ -55,7 +56,7 @@ export function Lesson() {
       </div>
 
       <div className="space-y-8">
-        {lesson.signs.map((sign, index) => (
+        {lesson.signs.map((sign: Sign, index: number) => (
           <div key={sign.id} className="card">
             <div className="grid md:grid-cols-2 gap-8">
               {/* Sign Image */}

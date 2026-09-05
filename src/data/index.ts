@@ -1,8 +1,6 @@
 import { Sign, Lesson, QuizQuestion } from './types'
 
-// Using public domain ASL sign images from Wikimedia Commons
-// and Unsplash/illustrative hand diagrams for the demo
-
+// Typing the record explicitly so Object.values returns Sign[]
 export const signs: Record<string, Sign> = {
   hello: {
     id: 'hello',
