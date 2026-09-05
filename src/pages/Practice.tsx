@@ -1,77 +1,39 @@
 import { useState, useRef, useEffect } from 'react'
-import { Camera, CameraOff, CheckCircle, XCircle, RefreshCw, Trophy, Star } from 'lucide-react'
+import { Camera, CameraOff, RefreshCw, Trophy, Star } from 'lucide-react'
 import { Hands, type Results, HAND_CONNECTIONS } from '@mediapipe/hands'
 import { drawConnectors, drawLandmarks } from '@mediapipe/drawing_utils'
 import { signs } from '../data'
-import { Sign } from '../data/types'
-import { matchSign } from '../data/landmarks'
-
-interface Level {
-  id: number
-  title: string
-  signIds: string[]
-  moves: number
-  starsRequired: number
-}
-
-const levels: Level[] = [
-  {
-    id: 1,
-    title: 'Welcome!',
-    signIds: ['hello', 'thank', 'yes'],
-    moves: 3,
-    starsRequired: 2,
-  },
-  {
-    id: 2,
-    title: 'Greetings',
-    signIds: ['please', 'sorry', 'no'],
-    moves: 3,
-    starsRequired: 2,
-  },
-  {
-    id: 3,
-    title: 'Daily Life',
-    signIds: ['water', 'food', 'more'],
-    moves: 3,
-    starsRequired: 2,
-  },
-  {
-    id: 4,
-    title: 'Family',
-    signIds: ['family', 'mother', 'father'],
-    moves: 3,
-    starsRequired: 2,
-  },
-  {
-    id: 5,
-    title: 'Everything!',
-    signIds: ['name', 'eat', 'hello'],
-    moves: 3,
-    starsRequired: 2,
-  },
-]
+import type { Sign } from '../data/types'
+import { matchSign, Landmark } from '../data/landmarks'
+import {
+  createGrid,
+  type Grid,
+  type Tile,
+  type Level,
+  levels,
+} from '../lib/match3'
+import { removeSign } from '../lib/gameEngine'
 
 export function Practice() {
-  const [currentLevel, setCurrentLevel] = useState(0)
-  const [movesLeft, setMovesLeft] = useState(levels[0].moves)
+  const [currentLevelIdx, setCurrentLevelIdx] = useState(0)
+  const [grid, setGrid] = useState<Grid>(() => createGrid(levels[0]))
   const [score, setScore] = useState(0)
+  const [moves, setMoves] = useState(levels[0].moves)
   const [showLevelComplete, setShowLevelComplete] = useState(false)
-  const [pendingSignId, setPendingSignId] = useState<string | null>(null)
   const [hasPermission, setHasPermission] = useState(false)
   const [cameraError, setCameraError] = useState<string | null>(null)
-  const [showHint, setShowHint] = useState(false)
   const [isModelReady, setIsModelReady] = useState(false)
   const [detectedSign, setDetectedSign] = useState<string | null>(null)
   const [confidence, setConfidence] = useState(0)
+  const [shatteredTiles, setShatteredTiles] = useState<ShatterParticle[]>([])
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const handsRef = useRef<Hands | null>(null)
   const animationRef = useRef<number | null>(null)
+  const detectionCooldownRef = useRef(false)
 
-  const level = levels[currentLevel]
-  const gridSigns: Sign[] = level.signIds.map((id) => signs[id])
+  const level: Level = levels[currentLevelIdx]
 
   useEffect(() => {
     let stream: MediaStream | null = null
@@ -91,7 +53,6 @@ export function Practice() {
         setHasPermission(true)
         setCameraError(null)
 
-        // Initialize MediaPipe Hands
         hands = new Hands({
           locateFile: (file: string) => {
             return `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/${file}`
@@ -109,7 +70,6 @@ export function Practice() {
         handsRef.current = hands
         setIsModelReady(true)
 
-        // Start processing loop
         const processFrame = async () => {
           if (videoRef.current && handsRef.current && videoRef.current.readyState >= 2) {
             await handsRef.current.send({ image: videoRef.current })
@@ -130,42 +90,50 @@ export function Practice() {
       const ctx = canvas.getContext('2d')
       if (!ctx) return
 
-      // Set canvas size to match video
       canvas.width = videoRef.current?.videoWidth || 640
       canvas.height = videoRef.current?.videoHeight || 480
 
-      // Clear canvas
       ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-      // Draw video frame onto canvas
       if (videoRef.current) {
         ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height)
       }
 
-      // Process hand landmarks
       if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
         const landmarks = results.multiHandLandmarks[0]
-
-        // Draw landmarks and connections
-        drawConnectors(ctx, landmarks, HAND_CONNECTIONS, { color: '#0ea5e9', lineWidth: 2 })
+        drawConnectors(ctx, landmarks, HAND_CONNECTIONS, { color: '#0ea5e2', lineWidth: 2 })
         drawLandmarks(ctx, landmarks, { color: '#ef4444', lineWidth: 1 })
 
-        // Convert to our landmark format and try to match
-        if (!pendingSignId) {
-          const ourLandmarks = landmarks.map((lm) => ({ x: lm.x, y: lm.y, z: lm.z }))
+        if (!detectionCooldownRef.current && moves > 0 && !showLevelComplete) {
+          const ourLandmarks: Landmark[] = landmarks.map((lm) => ({ x: lm.x, y: lm.y, z: lm.z }))
           const match = matchSign(ourLandmarks)
 
-          if (match) {
+          if (match && level.signIds.includes(match.signId)) {
             setDetectedSign(match.signId)
             setConfidence(match.confidence)
+            detectionCooldownRef.current = true
 
-            // If detected sign matches a sign in the current level, auto-select it
-            if (level.signIds.includes(match.signId)) {
-              setPendingSignId(match.signId)
+            // Animate: shatter particles on matching tiles
+            const matchingTiles = getShatterTiles(grid, match.signId)
+            if (matchingTiles.length > 0) {
+              setShatteredTiles(createShatterParticles(matchingTiles))
             }
-          } else {
+
+            // Apply the sign removal with cascade
+            const result = removeSign(grid, match.signId, level)
+            setGrid(result.grid)
+            setScore((s) => s + result.score)
+            setMoves((m) => m - 1)
             setDetectedSign(null)
             setConfidence(0)
+
+            // Re-collapse any pre-existing matches from cascade
+            setTimeout(() => {
+              detectionCooldownRef.current = false
+            }, 300)
+          } else {
+            setDetectedSign(match?.signId ?? null)
+            setConfidence(match?.confidence ?? 0)
           }
         }
       } else {
@@ -181,73 +149,64 @@ export function Practice() {
       if (hands) hands.close()
       if (stream) stream.getTracks().forEach((t) => t.stop())
     }
-  }, [pendingSignId, level.signIds])
+  }, [currentLevelIdx, moves, grid, showLevelComplete, level])
 
-  const confirmCorrect = () => {
-    setScore((s) => s + 10)
-    setMovesLeft((m) => m - 1)
-    setPendingSignId(null)
-    setDetectedSign(null)
-    setConfidence(0)
-    if (movesLeft <= 1) setShowLevelComplete(true)
+  useEffect(() => {
+    if (moves <= 0 && !showLevelComplete) {
+      setShowLevelComplete(true)
+    }
+  }, [moves, showLevelComplete])
+
+  const handleRestart = () => {
+    setGrid(createGrid(level))
+    setScore(0)
+    setMoves(level.moves)
+    setShowLevelComplete(false)
+    setShatteredTiles([])
   }
 
-  const confirmWrong = () => {
-    setMovesLeft((m) => m - 1)
-    setPendingSignId(null)
-    setDetectedSign(null)
-    setConfidence(0)
-    if (movesLeft <= 1) setShowLevelComplete(true)
-  }
-
-  const nextLevel = () => {
-    if (currentLevel < levels.length - 1) {
-      setCurrentLevel((l) => l + 1)
-      setMovesLeft(levels[currentLevel + 1]?.moves ?? 3)
+  const handleNextLevel = () => {
+    if (currentLevelIdx < levels.length - 1) {
+      setCurrentLevelIdx((i) => i + 1)
+      setGrid(createGrid(levels[currentLevelIdx + 1]))
       setScore(0)
+      setMoves(levels[currentLevelIdx + 1].moves)
       setShowLevelComplete(false)
+      setShatteredTiles([])
     }
   }
 
-  const restartLevel = () => {
-    setMovesLeft(level.moves)
-    setScore(0)
-    setPendingSignId(null)
-    setShowLevelComplete(false)
-    setDetectedSign(null)
-    setConfidence(0)
-  }
+  const starsEarned = score >= level.scoreTarget * 0.66 ? 3 : score >= level.scoreTarget * 0.33 ? 2 : 1
 
-  const starsEarned = movesLeft >= 2 ? 3 : movesLeft >= 1 ? 2 : 1
-  const targetSign = gridSigns[0]
+  const clearTargetCount = getClearTargetProgress(grid, level)
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">ASL Practice</h1>
+          <h1 className="text-3xl font-bold text-gray-900">Sign Crush</h1>
           <p className="text-gray-600 mt-1">
-            Level {currentLevel + 1}: <span className="font-medium">{level.title}</span>
+            Level {level.id}: <span className="font-medium">{level.title}</span>
           </p>
         </div>
-        <div className="flex items-center gap-4 text-sm">
-          <span className="font-medium">Score: {score}</span>
-          <span className="font-medium">Moves: {movesLeft}</span>
-          <span className="font-medium">Stars: {starsEarned}/3</span>
+        <div className="flex flex-wrap gap-4 text-sm">
+          <span className="font-medium">Score: {score} / {level.scoreTarget}</span>
+          <span className="font-medium">Moves: {moves}</span>
+          <span className="font-medium">Clear: {clearTargetCount}/{level.clearTarget.count} {signs[level.clearTarget.signId]?.word}</span>
         </div>
       </div>
 
-      {/* Detection Status */}
+      {/* Detection overlay */}
       {isModelReady && (
-        <div className="card">
+        <div className="card mb-6">
           <div className="flex justify-between items-center">
             <div>
               <span className="font-medium text-gray-700">AI Detection:</span>
               {detectedSign ? (
                 <span className="text-primary-600 font-bold"> {signs[detectedSign]?.word || detectedSign}</span>
               ) : (
-                <span className="text-gray-500"> No hand detected</span>
+                <span className="text-gray-500"> Show a sign to detect</span>
               )}
             </div>
             {detectedSign && confidence > 0 && (
@@ -265,46 +224,34 @@ export function Practice() {
         </div>
       )}
 
-      {/* Game Board - Grid of signs */}
-      <div className="grid grid-cols-3 gap-4 max-w-2xl mx-auto">
-        {gridSigns.map((sign: Sign) => (
-          <button
-            key={sign.id}
-            onClick={() => !pendingSignId && movesLeft > 0 && setPendingSignId(sign.id)}
-            disabled={movesLeft <= 0 || pendingSignId !== null}
-            className={`relative aspect-square rounded-2xl border-4 transition-all duration-300 ${
-              pendingSignId === sign.id
-                ? 'border-yellow-400 bg-yellow-50 scale-105'
-                : detectedSign === sign.id
-                ? 'border-green-400 bg-green-50 scale-105 animate-pulse'
-                : movesLeft <= 0 || pendingSignId !== null
-                ? 'border-gray-200 bg-gray-50 cursor-not-allowed opacity-50'
-                : 'border-primary-200 bg-white hover:border-primary-400 hover:bg-primary-50 hover:scale-105'
-            }`}
-          >
-            <div className="h-full flex flex-col items-center justify-center p-4">
-              <div className="text-3xl mb-2">
-                {sign.image ? (
-                  <img
-                    src={sign.image}
-                    alt={sign.word}
-                    className="w-16 h-16 object-contain"
-                    onError={(e) => {
-                      const target = e.target as HTMLImageElement
-                      target.src = `https://placehold.co/64x64/e0f2fe/0ea5e9?text=?`
-                    }}
-                  />
-                ) : (
-                  '🤟'
-                )}
-              </div>
-              <span className="text-lg font-semibold text-gray-800">{sign.word}</span>
-              {detectedSign === sign.id && (
-                <CheckCircle className="w-5 h-5 text-green-500 absolute top-1 right-1" />
-              )}
-            </div>
-          </button>
-        ))}
+      {/* Game Board */}
+      <div className="relative max-w-2xl mx-auto mb-8">
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(8, 1fr)', gap: '4px' }}>
+          {grid.map((row, r) =>
+            row.map((tile, c) => {
+              if (!tile) return <div key={`${r}-${c}`} className="aspect-square" />
+
+              return (
+                <TileCell
+                  key={tile.id}
+                  tile={tile}
+                  r={r}
+                  c={c}
+                  sign={signs[tile.signId]}
+                  shattered={shatteredTiles}
+                />
+              )
+            })
+          )}
+        </div>
+
+        {/* Shatter particles canvas overlay */}
+        {shatteredTiles.length > 0 && (
+          <canvas
+            className="absolute top-0 left-0 w-full h-full pointer-events-none"
+            style={{ width: '100%', height: '100%' }}
+          />
+        )}
       </div>
 
       {/* Webcam + Reference */}
@@ -313,39 +260,26 @@ export function Practice() {
         <div className="card text-center">
           <h3 className="font-semibold text-gray-700 mb-4">Mimic This Sign</h3>
           <div className="bg-gray-100 rounded-xl p-6 min-h-[240px] flex items-center justify-center">
-            {targetSign?.image ? (
+            {signs[level.clearTarget.signId]?.image ? (
               <img
-                src={targetSign.image}
-                alt={targetSign.word}
+                src={signs[level.clearTarget.signId]!.image}
+                alt={signs[level.clearTarget.signId]!.word}
                 className="max-w-full max-h-[200px] object-contain"
-                onError={(e) => {
-                  const target = e.target as HTMLImageElement
-                  target.src = `https://placehold.co/240x240/e0f2fe/0ea5e9?text=${encodeURIComponent(targetSign.word)}`
-                }}
               />
             ) : (
               <div className="text-center">
                 <div className="text-6xl mb-2">🤟</div>
-                <span className="text-gray-500">{targetSign?.word}</span>
+                <span className="text-gray-500">{signs[level.clearTarget.signId]?.word}</span>
               </div>
             )}
           </div>
-          {showHint && (
-            <div className="mt-4 text-left bg-primary-50 p-3 rounded-xl">
-              <p className="text-sm text-primary-800"><strong>Handshape:</strong> {targetSign?.handshape}</p>
-              <p className="text-sm text-primary-800"><strong>Movement:</strong> {targetSign?.movement}</p>
-              <p className="text-sm text-primary-800"><strong>Location:</strong> {targetSign?.location}</p>
-            </div>
-          )}
-          <button
-            onClick={() => setShowHint(!showHint)}
-            className="mt-3 btn-secondary text-sm"
-          >
-            {showHint ? 'Hide Hint' : 'Show Hint'}
-          </button>
+          <p className="mt-2 text-sm text-gray-600">{signs[level.clearTarget.signId]?.description}</p>
+          <p className="text-xs text-gray-500 mt-1">
+            Handshape: {signs[level.clearTarget.signId]?.handshape} | Movement: {signs[level.clearTarget.signId]?.movement}
+          </p>
         </div>
 
-        {/* Webcam with overlay */}
+        {/* Webcam */}
         <div className="card">
           <h3 className="font-semibold text-gray-700 mb-4">Your Camera</h3>
           {hasPermission ? (
@@ -355,7 +289,7 @@ export function Practice() {
                 autoPlay
                 playsInline
                 muted
-                className="w-full h-[240px] object-cover rounded-xl bg-black mirror"
+                className="w-full h-[280px] object-cover rounded-xl bg-black mirror"
               />
               <canvas
                 ref={canvasRef}
@@ -366,22 +300,27 @@ export function Practice() {
                   Loading AI model...
                 </div>
               )}
-              <div className="absolute bottom-2 left-2 bg-green-500 text-white text-xs px-2 py-1 rounded-full">
+              <div className="absolute bottom-2 left-2 bg-green-500 text-white text-xs px-2 py-1 rounded-full flex items-center gap-1">
+                <span className="w-2 h-2 bg-white rounded-full animate-pulse"></span>
                 Live
               </div>
             </div>
           ) : cameraError ? (
-            <div className="bg-gray-100 rounded-xl p-6 min-h-[240px] flex flex-col items-center justify-center">
+            <div className="bg-gray-100 rounded-xl p-6 min-h-[280px] flex flex-col items-center justify-center">
               <CameraOff className="w-12 h-12 text-gray-400 mb-4" />
               <p className="text-gray-600 mb-4">{cameraError}</p>
               <button
                 onClick={async () => {
-                  const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
-                  })
-                  if (videoRef.current) videoRef.current.srcObject = stream
-                  setHasPermission(true)
-                  setCameraError(null)
+                  try {
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                      video: { facingMode: 'user' },
+                    })
+                    if (videoRef.current) videoRef.current.srcObject = stream
+                    setHasPermission(true)
+                    setCameraError(null)
+                  } catch {
+                    setCameraError('Still no camera access. Check permissions.')
+                  }
                 }}
                 className="btn-secondary inline-flex items-center gap-2"
               >
@@ -390,33 +329,9 @@ export function Practice() {
               </button>
             </div>
           ) : (
-            <div className="bg-gray-100 rounded-xl p-6 min-h-[240px] flex items-center justify-center">
+            <div className="bg-gray-100 rounded-xl p-6 min-h-[280px] flex items-center justify-center">
               <Camera className="w-12 h-12 text-gray-400 mb-2" />
               <p className="text-gray-500">Starting camera...</p>
-            </div>
-          )}
-
-          {pendingSignId && (
-            <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-xl">
-              <p className="text-yellow-800 font-medium text-center">
-                Detected: "{signs[pendingSignId]?.word}"
-              </p>
-              <div className="flex justify-center gap-3 mt-3">
-                <button
-                  onClick={confirmCorrect}
-                  className="flex-1 bg-green-500 hover:bg-green-600 text-white font-semibold py-2 px-4 rounded-xl transition-colors"
-                >
-                  <CheckCircle className="w-4 h-4 inline mr-1" />
-                  Correct
-                </button>
-                <button
-                  onClick={confirmWrong}
-                  className="flex-1 bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-xl transition-colors"
-                >
-                  <XCircle className="w-4 h-4 inline mr-1" />
-                  Wrong
-                </button>
-              </div>
             </div>
           )}
         </div>
@@ -428,10 +343,10 @@ export function Practice() {
           <div className="bg-white rounded-2xl p-8 max-w-md text-center mx-4">
             <Trophy className="w-16 h-16 text-yellow-400 mx-auto mb-4" />
             <h2 className="text-2xl font-bold text-gray-900 mb-2">
-              Level {starsEarned >= 3 ? 'Complete! 🌟' : 'Passed! ⭐'} {level.title}
+              Level {starsEarned >= 3 ? 'Complete! 🌟' : 'Passed! ⭐'}
             </h2>
             <div className="flex justify-center gap-1 mb-4">
-              {[...Array(3)].map((_, i) => (
+              {[...Array(starsEarned)].map((_, i: number) => (
                 <Star
                   key={i}
                   className={`w-6 h-6 ${i < starsEarned ? 'text-yellow-400 fill-current' : 'text-gray-300'}`}
@@ -439,20 +354,23 @@ export function Practice() {
               ))}
             </div>
             <p className="text-gray-600 mb-6">
-              Score: {score} points | Stars: {starsEarned}/3
+              Score: {score} | Moves used: {level.moves - moves}
             </p>
             <div className="flex gap-3 justify-center">
-              <button onClick={restartLevel} className="btn-secondary">
+              <button onClick={handleRestart} className="btn-secondary">
                 <RefreshCw className="w-4 h-4 inline mr-1" />
                 Replay
               </button>
-              {currentLevel < levels.length - 1 ? (
-                <button onClick={nextLevel} className="btn-primary">
+              {currentLevelIdx < levels.length - 1 ? (
+                <button onClick={handleNextLevel} className="btn-primary">
                   Next Level →
                 </button>
               ) : (
                 <button
-                  onClick={() => window.location.reload()}
+                  onClick={() => {
+                    setCurrentLevelIdx(0)
+                    handleRestart()
+                  }}
                   className="btn-primary"
                 >
                   Play Again
@@ -461,6 +379,83 @@ export function Practice() {
             </div>
           </div>
         </div>
+      )}
+    </div>
+  )
+}
+
+interface ShatterParticle {
+  id: string
+  r: number
+  c: number
+  vx: number
+  vy: number
+  life: number
+}
+
+function getShatterTiles(g: Grid, signId: string): { r: number; c: number }[] {
+  const tiles: { r: number; c: number }[] = []
+  for (let r = 0; r < g.length; r++) {
+    for (let c = 0; c < g[r].length; c++) {
+      if (g[r][c]?.signId === signId) {
+        tiles.push({ r, c })
+      }
+    }
+  }
+  return tiles
+}
+
+function createShatterParticles(matches: { r: number; c: number }[]): ShatterParticle[] {
+  return matches.map(({ r, c }) => ({
+    id: `${r}-${c}-${Date.now()}`,
+    r,
+    c,
+    vx: (Math.random() - 0.5) * 6,
+    vy: (Math.random() - 0.5) * 6 - 3,
+    life: 1,
+  }))
+}
+
+function getClearTargetProgress(g: Grid, lvl: Level): number {
+  return g.flat().filter((t) => t?.signId === lvl.clearTarget.signId).length
+}
+
+function TileCell({ tile, r, c, sign, shattered }: {
+  tile: Tile
+  r: number
+  c: number
+  sign: Sign | undefined
+  shattered: ShatterParticle[]
+}) {
+  const imgUrl = sign?.image || `https://placehold.co/48x48/e0f2fe/0ea5e2?text=${sign?.word?.[0] || '?'}`
+  const particle = shattered.find((p) => p.r === r && p.c === c)
+
+  return (
+    <div
+      className={`relative aspect-square rounded-lg border-2 flex items-center justify-center overflow-hidden transition-all duration-300 ${
+        particle
+          ? 'absolute animate-ping opacity-0 scale-150'
+          : 'bg-white border-primary-200 hover:scale-105 hover:shadow-lg'
+      }`}
+      style={{
+        animation: particle ? `shatter 0.3s ease-out forwards` : undefined,
+      }}
+    >
+      {!particle && (
+        <>
+          <img
+            src={imgUrl}
+            alt={sign?.word}
+            className="w-8 h-8 object-contain"
+            onError={(e) => {
+              const target = e.target as HTMLImageElement
+              target.src = `https://placehold.co/48x48/e0f2fe/0ea5e2?text=${sign?.word?.[0] || '?'}`
+            }}
+          />
+          <span className="absolute bottom-0 text-xs text-gray-600 bg-white/80 px-1 rounded-t">
+            {sign?.word?.[0]}
+          </span>
+        </>
       )}
     </div>
   )
