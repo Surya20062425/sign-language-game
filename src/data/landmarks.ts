@@ -1,8 +1,8 @@
 import { Sign } from './types'
 
 // MediaPipe Hand Landmark indices:
-// 0: WRIST, 1-4: THUMB (tip=4), 5-8: INDEX (tip=8), 9-12: MIDDLE (tip=12),
-// 13-16: RING (tip=16), 17-20: PINKY (tip=20)
+// 0: WRIST, 1-4: THUMB (CMC, MCP, IP, TIP), 5-8: INDEX (MCP, PIP, DIP, TIP),
+// 9-12: MIDDLE (MCP, PIP, DIP, TIP), 13-16: RING, 17-20: PINKY
 
 export interface Landmark {
   x: number
@@ -11,335 +11,332 @@ export interface Landmark {
 }
 
 // Template landmarks for sign matching.
-// Normalized relative to WRIST (index 0) as origin.
-// Derived from ASL reference diagrams.
+// Normalized relative coordinates based on the WRIST (index 0) as origin.
 //
-// ponytail: This is a simplified heuristic matcher — uses Euclidean distance
-// on normalized landmarks. Upgrade path: train a proper classifier model
-// or use a larger reference dataset for each sign.
+// ponytail: Simplified heuristic — Euclidean distance on normalized landmarks.
+// Upgrade path: trained ML classifier or dynamic time warping for temporal matching.
 export const signTemplates: Record<string, Landmark[]> = {
   hello: [
-    { x: 0.5, y: 0.5, z: 0 },    // 0  wrist
-    { x: 0.6, y: 0.4, z: 0 },    // 1  thumb mcp
-    { x: 0.7, y: 0.35, z: 0 },   // 2  thumb ip
-    { x: 0.8, y: 0.35, z: 0 },   // 3  thumb tip
-    { x: 0.45, y: 0.4, z: 0 },   // 4  index mcp
-    { x: 0.45, y: 0.3, z: 0 },   // 5  index pip
-    { x: 0.45, y: 0.25, z: 0 },  // 6  index dip
-    { x: 0.45, y: 0.2, z: 0 },   // 7  index tip
-    { x: 0.55, y: 0.4, z: 0 },   // 8  middle mcp
-    { x: 0.55, y: 0.28, z: 0 },  // 9  middle pip
-    { x: 0.55, y: 0.2, z: 0 },   // 10 middle tip
-    { x: 0.65, y: 0.4, z: 0 },   // 11 ring mcp
-    { x: 0.65, y: 0.3, z: 0 },   // 12 ring pip
-    { x: 0.65, y: 0.22, z: 0 },  // 13 ring dip
-    { x: 0.65, y: 0.18, z: 0 },  // 14 ring tip
-    { x: 0.75, y: 0.4, z: 0 },   // 15 pinky mcp
-    { x: 0.75, y: 0.32, z: 0 },  // 16 pinky pip
-    { x: 0.75, y: 0.27, z: 0 },  // 17 pinky dip
-    { x: 0.75, y: 0.23, z: 0 },  // 18 pinky tip
-    { x: 0.55, y: 0.42, z: 0 },  // 19 thumb ip2 (extra)
-    { x: 0.5, y: 0.5, z: 0 },    // 20 pinky tip2 (extra)
+    { x: 0.5, y: 0.5, z: 0 }, // 0 wrist
+    { x: 0.6, y: 0.43, z: 0 }, // 1 thumb_cmc
+    { x: 0.65, y: 0.4, z: 0 }, // 2 thumb_mcp
+    { x: 0.7, y: 0.38, z: 0 }, // 3 thumb_ip
+    { x: 0.78, y: 0.38, z: 0 }, // 4 thumb_tip
+    { x: 0.45, y: 0.4, z: 0 }, // 5 index_mcp
+    { x: 0.45, y: 0.3, z: 0 }, // 6 index_pip
+    { x: 0.45, y: 0.25, z: 0 }, // 7 index_dip
+    { x: 0.42, y: 0.22, z: 0 }, // 8 index_tip
+    { x: 0.5, y: 0.4, z: 0 }, // 9 middle_mcp
+    { x: 0.5, y: 0.3, z: 0 }, // 10 middle_pip
+    { x: 0.5, y: 0.25, z: 0 }, // 11 middle_dip
+    { x: 0.5, y: 0.22, z: 0 }, // 12 middle_tip
+    { x: 0.56, y: 0.4, z: 0 }, // 13 ring_mcp
+    { x: 0.56, y: 0.3, z: 0 }, // 14 ring_pip
+    { x: 0.56, y: 0.25, z: 0 }, // 15 ring_dip
+    { x: 0.58, y: 0.22, z: 0 }, // 16 ring_tip
+    { x: 0.62, y: 0.4, z: 0 }, // 17 pinky_mcp
+    { x: 0.62, y: 0.3, z: 0 }, // 18 pinky_pip
+    { x: 0.62, y: 0.22999999999999998, z: 0 }, // 19 pinky_dip
+    { x: 0.66, y: 0.22, z: 0 }, // 20 pinky_tip
   ],
   thank: [
-    { x: 0.5, y: 0.5, z: 0 },    // 0  wrist
-    { x: 0.58, y: 0.42, z: 0 },  // 1  thumb mcp — hand tilted slightly
-    { x: 0.66, y: 0.38, z: 0 },  // 2  thumb ip
-    { x: 0.74, y: 0.38, z: 0 },  // 3  thumb tip — extended
-    { x: 0.42, y: 0.4, z: 0 },   // 4  index mcp
-    { x: 0.4, y: 0.3, z: 0 },    // 5  index pip
-    { x: 0.39, y: 0.24, z: 0 },  // 6  index dip
-    { x: 0.38, y: 0.18, z: 0 },  // 7  index tip — extended (tilted hand)
-    { x: 0.52, y: 0.4, z: 0 },   // 8  middle mcp
-    { x: 0.5, y: 0.28, z: 0 },   // 9  middle pip
-    { x: 0.49, y: 0.2, z: 0 },   // 10 middle tip — extended
-    { x: 0.62, y: 0.4, z: 0 },   // 11 ring mcp
-    { x: 0.6, y: 0.3, z: 0 },    // 12 ring pip
-    { x: 0.59, y: 0.22, z: 0 },  // 13 ring dip
-    { x: 0.58, y: 0.18, z: 0 },  // 14 ring tip — extended
-    { x: 0.72, y: 0.4, z: 0 },   // 15 pinky mcp
-    { x: 0.7, y: 0.32, z: 0 },   // 16 pinky pip
-    { x: 0.69, y: 0.27, z: 0 },  // 17 pinky dip
-    { x: 0.68, y: 0.23, z: 0 },  // 18 pinky tip — extended
-    { x: 0.53, y: 0.42, z: 0 },  // 19 thumb ip2
-    { x: 0.5, y: 0.5, z: 0 },    // 20 pinky tip2
+    { x: 0.5, y: 0.5, z: 0 }, // 0 wrist
+    { x: 0.6, y: 0.43, z: 0 }, // 1 thumb_cmc
+    { x: 0.65, y: 0.4, z: 0 }, // 2 thumb_mcp
+    { x: 0.7, y: 0.38, z: 0 }, // 3 thumb_ip
+    { x: 0.42, y: 0.42, z: 0 }, // 4 thumb_tip
+    { x: 0.45, y: 0.4, z: 0 }, // 5 index_mcp
+    { x: 0.45, y: 0.3, z: 0 }, // 6 index_pip
+    { x: 0.45, y: 0.25, z: 0 }, // 7 index_dip
+    { x: 0.43, y: 0.23, z: 0 }, // 8 index_tip
+    { x: 0.5, y: 0.4, z: 0 }, // 9 middle_mcp
+    { x: 0.5, y: 0.3, z: 0 }, // 10 middle_pip
+    { x: 0.5, y: 0.25, z: 0 }, // 11 middle_dip
+    { x: 0.5, y: 0.23, z: 0 }, // 12 middle_tip
+    { x: 0.56, y: 0.4, z: 0 }, // 13 ring_mcp
+    { x: 0.56, y: 0.3, z: 0 }, // 14 ring_pip
+    { x: 0.56, y: 0.25, z: 0 }, // 15 ring_dip
+    { x: 0.58, y: 0.23, z: 0 }, // 16 ring_tip
+    { x: 0.62, y: 0.4, z: 0 }, // 17 pinky_mcp
+    { x: 0.62, y: 0.3, z: 0 }, // 18 pinky_pip
+    { x: 0.62, y: 0.22999999999999998, z: 0 }, // 19 pinky_dip
+    { x: 0.66, y: 0.23, z: 0 }, // 20 pinky_tip
   ],
   please: [
-    { x: 0.5, y: 0.5, z: 0 },    // 0  wrist
-    { x: 0.45, y: 0.45, z: 0 },  // 1  thumb mcp — folded
-    { x: 0.42, y: 0.42, z: 0 },  // 2  thumb ip
-    { x: 0.4, y: 0.4, z: 0 },    // 3  thumb tip — tucked
-    { x: 0.48, y: 0.45, z: 0 },  // 4  index mcp — curled
-    { x: 0.47, y: 0.44, z: 0 },  // 5  index pip
-    { x: 0.46, y: 0.43, z: 0 },  // 6  index dip
-    { x: 0.45, y: 0.43, z: 0 },  // 7  index tip — curled
-    { x: 0.52, y: 0.45, z: 0 },  // 8  middle mcp — curled
-    { x: 0.51, y: 0.44, z: 0 },  // 9  middle pip
-    { x: 0.5, y: 0.43, z: 0 },   // 10 middle tip — curled
-    { x: 0.58, y: 0.46, z: 0 },  // 11 ring mcp — curled
-    { x: 0.57, y: 0.45, z: 0 },  // 12 ring pip
-    { x: 0.56, y: 0.44, z: 0 },  // 13 ring dip
-    { x: 0.55, y: 0.44, z: 0 },  // 14 ring tip — curled
-    { x: 0.63, y: 0.47, z: 0 },  // 15 pinky mcp — curled
-    { x: 0.62, y: 0.46, z: 0 },  // 16 pinky pip
-    { x: 0.61, y: 0.45, z: 0 },  // 17 pinky dip
-    { x: 0.6, y: 0.45, z: 0 },   // 18 pinky tip — curled
-    { x: 0.5, y: 0.5, z: 0 },    // 19 thumb ip2
-    { x: 0.5, y: 0.5, z: 0 },    // 20 pinky tip2
+    { x: 0.5, y: 0.5, z: 0 }, // 0 wrist
+    { x: 0.42, y: 0.48, z: 0 }, // 1 thumb_cmc
+    { x: 0.4, y: 0.46, z: 0 }, // 2 thumb_mcp
+    { x: 0.38, y: 0.44, z: 0 }, // 3 thumb_ip
+    { x: 0.36, y: 0.42, z: 0 }, // 4 thumb_tip
+    { x: 0.48, y: 0.43, z: 0 }, // 5 index_mcp
+    { x: 0.47, y: 0.41, z: 0 }, // 6 index_pip
+    { x: 0.46, y: 0.4, z: 0 }, // 7 index_dip
+    { x: 0.45, y: 0.39, z: 0 }, // 8 index_tip
+    { x: 0.52, y: 0.43, z: 0 }, // 9 middle_mcp
+    { x: 0.51, y: 0.41, z: 0 }, // 10 middle_pip
+    { x: 0.5, y: 0.4, z: 0 }, // 11 middle_dip
+    { x: 0.49, y: 0.39, z: 0 }, // 12 middle_tip
+    { x: 0.56, y: 0.44, z: 0 }, // 13 ring_mcp
+    { x: 0.55, y: 0.42, z: 0 }, // 14 ring_pip
+    { x: 0.54, y: 0.41, z: 0 }, // 15 ring_dip
+    { x: 0.53, y: 0.4, z: 0 }, // 16 ring_tip
+    { x: 0.62, y: 0.45, z: 0 }, // 17 pinky_mcp
+    { x: 0.61, y: 0.43, z: 0 }, // 18 pinky_pip
+    { x: 0.6, y: 0.42, z: 0 }, // 19 pinky_dip
+    { x: 0.59, y: 0.41, z: 0 }, // 20 pinky_tip
   ],
   sorry: [
-    { x: 0.5, y: 0.5, z: 0 },    // 0  wrist
-    { x: 0.42, y: 0.48, z: 0 },  // 1  thumb mcp
-    { x: 0.38, y: 0.45, z: 0 },  // 2  thumb ip
-    { x: 0.35, y: 0.42, z: 0 },  // 3  thumb tip — extended (fist nodding)
-    { x: 0.48, y: 0.45, z: 0 },  // 4  index mcp — curled into fist
-    { x: 0.47, y: 0.44, z: 0 },  // 5  index pip
-    { x: 0.46, y: 0.43, z: 0 },  // 6  index dip
-    { x: 0.45, y: 0.43, z: 0 },  // 7  index tip — curled
-    { x: 0.52, y: 0.45, z: 0 },  // 8  middle mcp — curled
-    { x: 0.51, y: 0.44, z: 0 },  // 9  middle pip
-    { x: 0.5, y: 0.43, z: 0 },   // 10 middle tip — curled
-    { x: 0.58, y: 0.46, z: 0 },  // 11 ring mcp — curled
-    { x: 0.57, y: 0.45, z: 0 },  // 12 ring pip
-    { x: 0.56, y: 0.44, z: 0 },  // 13 ring dip
-    { x: 0.55, y: 0.44, z: 0 },  // 14 ring tip — curled
-    { x: 0.63, y: 0.47, z: 0 },  // 15 pinky mcp — curled
-    { x: 0.62, y: 0.46, z: 0 },  // 16 pinky pip
-    { x: 0.61, y: 0.45, z: 0 },  // 17 pinky dip
-    { x: 0.6, y: 0.45, z: 0 },   // 18 pinky tip — curled
-    { x: 0.42, y: 0.43, z: 0 },  // 19 thumb ip2
-    { x: 0.5, y: 0.5, z: 0 },    // 20 pinky tip2
+    { x: 0.5, y: 0.5, z: 0 }, // 0 wrist
+    { x: 0.48, y: 0.46, z: 0 }, // 1 thumb_cmc
+    { x: 0.46, y: 0.44, z: 0 }, // 2 thumb_mcp
+    { x: 0.44, y: 0.42, z: 0 }, // 3 thumb_ip
+    { x: 0.42, y: 0.4, z: 0 }, // 4 thumb_tip
+    { x: 0.48, y: 0.43, z: 0 }, // 5 index_mcp
+    { x: 0.47, y: 0.41, z: 0 }, // 6 index_pip
+    { x: 0.46, y: 0.4, z: 0 }, // 7 index_dip
+    { x: 0.45, y: 0.39, z: 0 }, // 8 index_tip
+    { x: 0.52, y: 0.43, z: 0 }, // 9 middle_mcp
+    { x: 0.51, y: 0.41, z: 0 }, // 10 middle_pip
+    { x: 0.5, y: 0.4, z: 0 }, // 11 middle_dip
+    { x: 0.49, y: 0.39, z: 0 }, // 12 middle_tip
+    { x: 0.56, y: 0.44, z: 0 }, // 13 ring_mcp
+    { x: 0.55, y: 0.42, z: 0 }, // 14 ring_pip
+    { x: 0.54, y: 0.41, z: 0 }, // 15 ring_dip
+    { x: 0.53, y: 0.4, z: 0 }, // 16 ring_tip
+    { x: 0.62, y: 0.45, z: 0 }, // 17 pinky_mcp
+    { x: 0.61, y: 0.43, z: 0 }, // 18 pinky_pip
+    { x: 0.6, y: 0.42, z: 0 }, // 19 pinky_dip
+    { x: 0.59, y: 0.41, z: 0 }, // 20 pinky_tip
   ],
   yes: [
-    { x: 0.5, y: 0.5, z: 0 },    // 0  wrist
-    { x: 0.42, y: 0.45, z: 0 },  // 1  thumb mcp — across index
-    { x: 0.4, y: 0.44, z: 0 },   // 2  thumb ip
-    { x: 0.38, y: 0.44, z: 0 },  // 3  thumb tip — tucked (fist)
-    { x: 0.48, y: 0.42, z: 0 },  // 4  index mcp — folded
-    { x: 0.47, y: 0.42, z: 0 },  // 5  index pip
-    { x: 0.46, y: 0.42, z: 0 },  // 6  index dip
-    { x: 0.45, y: 0.42, z: 0 },  // 7  index tip — folded
-    { x: 0.52, y: 0.42, z: 0 },  // 8  middle mcp — folded
-    { x: 0.51, y: 0.42, z: 0 },  // 9  middle pip
-    { x: 0.5, y: 0.42, z: 0 },   // 10 middle tip — folded
-    { x: 0.58, y: 0.43, z: 0 },  // 11 ring mcp — folded
-    { x: 0.57, y: 0.42, z: 0 },  // 12 ring pip
-    { x: 0.56, y: 0.42, z: 0 },  // 13 ring dip
-    { x: 0.55, y: 0.42, z: 0 },  // 14 ring tip — folded
-    { x: 0.63, y: 0.44, z: 0 },  // 15 pinky mcp — folded
-    { x: 0.62, y: 0.43, z: 0 },  // 16 pinky pip
-    { x: 0.61, y: 0.43, z: 0 },  // 17 pinky dip
-    { x: 0.6, y: 0.43, z: 0 },   // 18 pinky tip — folded
-    { x: 0.5, y: 0.5, z: 0 },    // 19 thumb ip2
-    { x: 0.5, y: 0.5, z: 0 },    // 20 pinky tip2
+    { x: 0.5, y: 0.5, z: 0 }, // 0 wrist
+    { x: 0.42, y: 0.48, z: 0 }, // 1 thumb_cmc
+    { x: 0.4, y: 0.46, z: 0 }, // 2 thumb_mcp
+    { x: 0.38, y: 0.44, z: 0 }, // 3 thumb_ip
+    { x: 0.45, y: 0.42, z: 0 }, // 4 thumb_tip
+    { x: 0.48, y: 0.43, z: 0 }, // 5 index_mcp
+    { x: 0.47, y: 0.41, z: 0 }, // 6 index_pip
+    { x: 0.46, y: 0.4, z: 0 }, // 7 index_dip
+    { x: 0.45, y: 0.39, z: 0 }, // 8 index_tip
+    { x: 0.52, y: 0.43, z: 0 }, // 9 middle_mcp
+    { x: 0.51, y: 0.41, z: 0 }, // 10 middle_pip
+    { x: 0.5, y: 0.4, z: 0 }, // 11 middle_dip
+    { x: 0.49, y: 0.39, z: 0 }, // 12 middle_tip
+    { x: 0.56, y: 0.44, z: 0 }, // 13 ring_mcp
+    { x: 0.55, y: 0.42, z: 0 }, // 14 ring_pip
+    { x: 0.54, y: 0.41, z: 0 }, // 15 ring_dip
+    { x: 0.53, y: 0.4, z: 0 }, // 16 ring_tip
+    { x: 0.62, y: 0.45, z: 0 }, // 17 pinky_mcp
+    { x: 0.61, y: 0.43, z: 0 }, // 18 pinky_pip
+    { x: 0.6, y: 0.42, z: 0 }, // 19 pinky_dip
+    { x: 0.59, y: 0.41, z: 0 }, // 20 pinky_tip
   ],
   no: [
-    { x: 0.5, y: 0.5, z: 0 },    // 0  wrist
-    { x: 0.4, y: 0.45, z: 0 },   // 1  thumb mcp
-    { x: 0.35, y: 0.42, z: 0 },  // 2  thumb ip
-    { x: 0.32, y: 0.4, z: 0 },   // 3  thumb tip — tucked
-    { x: 0.48, y: 0.3, z: 0 },   // 4  index mcp — extended UP
-    { x: 0.47, y: 0.25, z: 0 },  // 5  index pip
-    { x: 0.46, y: 0.2, z: 0 },   // 6  index dip
-    { x: 0.45, y: 0.15, z: 0 },  // 7  index tip — extended UP
-    { x: 0.52, y: 0.3, z: 0 },   // 8  middle mcp — extended UP
-    { x: 0.51, y: 0.24, z: 0 },  // 9  middle pip
-    { x: 0.5, y: 0.17, z: 0 },   // 10 middle tip — extended UP
-    { x: 0.62, y: 0.45, z: 0 },  // 11 ring mcp — folded
-    { x: 0.61, y: 0.43, z: 0 },  // 12 ring pip
-    { x: 0.6, y: 0.42, z: 0 },   // 13 ring dip
-    { x: 0.59, y: 0.42, z: 0 },  // 14 ring tip — folded
-    { x: 0.7, y: 0.46, z: 0 },   // 15 pinky mcp — folded
-    { x: 0.69, y: 0.45, z: 0 },  // 16 pinky pip
-    { x: 0.68, y: 0.44, z: 0 },  // 17 pinky dip
-    { x: 0.67, y: 0.44, z: 0 },  // 18 pinky tip — folded
-    { x: 0.5, y: 0.5, z: 0 },    // 19 thumb ip2
-    { x: 0.5, y: 0.5, z: 0 },    // 20 pinky tip2
+    { x: 0.5, y: 0.5, z: 0 }, // 0 wrist
+    { x: 0.4, y: 0.47, z: 0 }, // 1 thumb_cmc
+    { x: 0.38, y: 0.44, z: 0 }, // 2 thumb_mcp
+    { x: 0.36, y: 0.41000000000000003, z: 0 }, // 3 thumb_ip
+    { x: 0.33999999999999997, y: 0.38, z: 0 }, // 4 thumb_tip
+    { x: 0.44, y: 0.42, z: 0 }, // 5 index_mcp
+    { x: 0.44, y: 0.32, z: 0 }, // 6 index_pip
+    { x: 0.44, y: 0.27, z: 0 }, // 7 index_dip
+    { x: 0.44, y: 0.2, z: 0 }, // 8 index_tip
+    { x: 0.52, y: 0.42, z: 0 }, // 9 middle_mcp
+    { x: 0.52, y: 0.32, z: 0 }, // 10 middle_pip
+    { x: 0.52, y: 0.27, z: 0 }, // 11 middle_dip
+    { x: 0.52, y: 0.2, z: 0 }, // 12 middle_tip
+    { x: 0.62, y: 0.47, z: 0 }, // 13 ring_mcp
+    { x: 0.61, y: 0.49, z: 0 }, // 14 ring_pip
+    { x: 0.6, y: 0.495, z: 0 }, // 15 ring_dip
+    { x: 0.59, y: 0.49, z: 0 }, // 16 ring_tip
+    { x: 0.6799999999999999, y: 0.48, z: 0 }, // 17 pinky_mcp
+    { x: 0.67, y: 0.495, z: 0 }, // 18 pinky_pip
+    { x: 0.66, y: 0.498, z: 0 }, // 19 pinky_dip
+    { x: 0.65, y: 0.495, z: 0 }, // 20 pinky_tip
   ],
   water: [
-    { x: 0.5, y: 0.5, z: 0 },    // 0  wrist
-    { x: 0.6, y: 0.4, z: 0 },    // 1  thumb mcp
-    { x: 0.7, y: 0.35, z: 0 },   // 2  thumb ip
-    { x: 0.78, y: 0.35, z: 0 },  // 3  thumb tip — extended
-    { x: 0.45, y: 0.4, z: 0 },   // 4  index mcp
-    { x: 0.45, y: 0.3, z: 0 },   // 5  index pip
-    { x: 0.45, y: 0.25, z: 0 },  // 6  index dip
-    { x: 0.43, y: 0.35, z: 0 },  // 7  index tip — pinched (near thumb tip)
-    { x: 0.55, y: 0.45, z: 0 },  // 8  middle mcp — extended
-    { x: 0.55, y: 0.32, z: 0 },  // 9  middle pip
-    { x: 0.55, y: 0.2, z: 0 },   // 10 middle tip — extended
-    { x: 0.65, y: 0.45, z: 0 },  // 11 ring mcp — extended
-    { x: 0.65, y: 0.32, z: 0 },  // 12 ring pip
-    { x: 0.65, y: 0.22, z: 0 },  // 13 ring dip
-    { x: 0.65, y: 0.15, z: 0 },  // 14 ring tip — extended
-    { x: 0.75, y: 0.47, z: 0 },  // 15 pinky mcp — extended
-    { x: 0.75, y: 0.35, z: 0 },  // 16 pinky pip
-    { x: 0.75, y: 0.28, z: 0 },  // 17 pinky dip
-    { x: 0.75, y: 0.22, z: 0 },  // 18 pinky tip — extended
-    { x: 0.55, y: 0.42, z: 0 },  // 19 thumb ip2
-    { x: 0.5, y: 0.5, z: 0 },    // 20 pinky tip2
+    { x: 0.5, y: 0.5, z: 0 }, // 0 wrist
+    { x: 0.58, y: 0.45, z: 0 }, // 1 thumb_cmc
+    { x: 0.62, y: 0.44, z: 0 }, // 2 thumb_mcp
+    { x: 0.66, y: 0.43, z: 0 }, // 3 thumb_ip
+    { x: 0.0, y: 0.0, z: 0.0 }, // 4 thumb_tip
+    { x: 0.48, y: 0.42, z: 0 }, // 5 index_mcp
+    { x: 0.49, y: 0.35, z: 0 }, // 6 index_pip
+    { x: 0.5, y: 0.32, z: 0 }, // 7 index_dip
+    { x: 0.52, y: 0.3, z: 0 }, // 8 index_tip
+    { x: 0.58, y: 0.42, z: 0 }, // 9 middle_mcp
+    { x: 0.58, y: 0.32, z: 0 }, // 10 middle_pip
+    { x: 0.58, y: 0.27, z: 0 }, // 11 middle_dip
+    { x: 0.58, y: 0.2, z: 0 }, // 12 middle_tip
+    { x: 0.66, y: 0.42, z: 0 }, // 13 ring_mcp
+    { x: 0.66, y: 0.32, z: 0 }, // 14 ring_pip
+    { x: 0.66, y: 0.27, z: 0 }, // 15 ring_dip
+    { x: 0.66, y: 0.2, z: 0 }, // 16 ring_tip
+    { x: 0.74, y: 0.42, z: 0 }, // 17 pinky_mcp
+    { x: 0.74, y: 0.32, z: 0 }, // 18 pinky_pip
+    { x: 0.74, y: 0.25, z: 0 }, // 19 pinky_dip
+    { x: 0.74, y: 0.2, z: 0 }, // 20 pinky_tip
   ],
-  // --- Additional signs ---
   more: [
-    { x: 0.5, y: 0.5, z: 0 },    // 0  wrist
-    { x: 0.5, y: 0.45, z: 0 },   // 1  thumb mcp
-    { x: 0.5, y: 0.4, z: 0 },    // 2  thumb ip
-    { x: 0.5, y: 0.35, z: 0 },   // 3  thumb tip — fingertips together (both hands)
-    { x: 0.4, y: 0.4, z: 0 },    // 4  index mcp
-    { x: 0.4, y: 0.3, z: 0 },    // 5  index pip
-    { x: 0.4, y: 0.25, z: 0 },   // 6  index dip
-    { x: 0.4, y: 0.2, z: 0 },    // 7  index tip — fingertips together
-    { x: 0.6, y: 0.4, z: 0 },    // 8  middle mcp
-    { x: 0.6, y: 0.3, z: 0 },    // 9  middle pip
-    { x: 0.6, y: 0.25, z: 0 },   // 10 middle tip
-    { x: 0.7, y: 0.45, z: 0 },   // 11 ring mcp — curled
-    { x: 0.69, y: 0.42, z: 0 },  // 12 ring ip
-    { x: 0.68, y: 0.41, z: 0 },  // 13 ring dip
-    { x: 0.67, y: 0.4, z: 0 },   // 14 ring tip — curled
-    { x: 0.8, y: 0.47, z: 0 },   // 15 pinky mcp — curled
-    { x: 0.79, y: 0.44, z: 0 },  // 16 pinky ip
-    { x: 0.78, y: 0.43, z: 0 },  // 17 pinky dip
-    { x: 0.77, y: 0.42, z: 0 },  // 18 pinky tip — curled
-    { x: 0.5, y: 0.42, z: 0 },   // 19 thumb ip2
-    { x: 0.5, y: 0.5, z: 0 },    // 20 pinky tip2
+    { x: 0.5, y: 0.5, z: 0 }, // 0 wrist
+    { x: 0.42, y: 0.47, z: 0 }, // 1 thumb_cmc
+    { x: 0.4, y: 0.45, z: 0 }, // 2 thumb_mcp
+    { x: 0.38, y: 0.43, z: 0 }, // 3 thumb_ip
+    { x: 0.0, y: 0.0, z: 0.0 }, // 4 thumb_tip
+    { x: 0.44, y: 0.45, z: 0 }, // 5 index_mcp
+    { x: 0.45, y: 0.38, z: 0 }, // 6 index_pip
+    { x: 0.46, y: 0.33999999999999997, z: 0 }, // 7 index_dip
+    { x: 0.48, y: 0.32, z: 0 }, // 8 index_tip
+    { x: 0.52, y: 0.45, z: 0 }, // 9 middle_mcp
+    { x: 0.52, y: 0.38, z: 0 }, // 10 middle_pip
+    { x: 0.52, y: 0.33999999999999997, z: 0 }, // 11 middle_dip
+    { x: 0.52, y: 0.32, z: 0 }, // 12 middle_tip
+    { x: 0.58, y: 0.45, z: 0 }, // 13 ring_mcp
+    { x: 0.58, y: 0.38, z: 0 }, // 14 ring_pip
+    { x: 0.58, y: 0.33999999999999997, z: 0 }, // 15 ring_dip
+    { x: 0.58, y: 0.32, z: 0 }, // 16 ring_tip
+    { x: 0.64, y: 0.45, z: 0 }, // 17 pinky_mcp
+    { x: 0.64, y: 0.38, z: 0 }, // 18 pinky_pip
+    { x: 0.64, y: 0.33999999999999997, z: 0 }, // 19 pinky_dip
+    { x: 0.64, y: 0.32, z: 0 }, // 20 pinky_tip
   ],
   food: [
-    { x: 0.5, y: 0.5, z: 0 },    // 0  wrist
-    { x: 0.5, y: 0.45, z: 0 },   // 1  thumb mcp
-    { x: 0.5, y: 0.42, z: 0 },   // 2  thumb ip
-    { x: 0.5, y: 0.4, z: 0 },    // 3  thumb tip — slightly extended
-    { x: 0.45, y: 0.4, z: 0 },   // 4  index mcp
-    { x: 0.43, y: 0.35, z: 0 },  // 5  index pip
-    { x: 0.41, y: 0.3, z: 0 },   // 6  index dip
-    { x: 0.4, y: 0.26, z: 0 },   // 7  index tip — fingertips to mouth area
-    { x: 0.55, y: 0.4, z: 0 },   // 8  middle mcp
-    { x: 0.54, y: 0.34, z: 0 },  // 9  middle pip
-    { x: 0.53, y: 0.29, z: 0 },  // 10 middle dip
-    { x: 0.52, y: 0.25, z: 0 },  // 11 middle tip
-    { x: 0.65, y: 0.45, z: 0 },  // 12 ring mcp
-    { x: 0.64, y: 0.38, z: 0 },  // 13 ring pip
-    { x: 0.63, y: 0.32, z: 0 },  // 14 ring dip
-    { x: 0.62, y: 0.28, z: 0 },  // 15 ring tip
-    { x: 0.75, y: 0.47, z: 0 },  // 16 pinky mcp
-    { x: 0.74, y: 0.4, z: 0 },   // 17 pinky pip
-    { x: 0.73, y: 0.32, z: 0 },  // 18 pinky tip
-    { x: 0.72, y: 0.28, z: 0 },  // 19 pinky tip2
-    { x: 0.5, y: 0.5, z: 0 },    // 20 pinky tip2
+    { x: 0.5, y: 0.5, z: 0 }, // 0 wrist
+    { x: 0.6, y: 0.43, z: 0 }, // 1 thumb_cmc
+    { x: 0.65, y: 0.4, z: 0 }, // 2 thumb_mcp
+    { x: 0.7, y: 0.38, z: 0 }, // 3 thumb_ip
+    { x: 0.75, y: 0.4, z: 0 }, // 4 thumb_tip
+    { x: 0.45, y: 0.4, z: 0 }, // 5 index_mcp
+    { x: 0.45, y: 0.3, z: 0 }, // 6 index_pip
+    { x: 0.45, y: 0.25, z: 0 }, // 7 index_dip
+    { x: 0.44, y: 0.25, z: 0 }, // 8 index_tip
+    { x: 0.45, y: 0.26, z: 0 }, // 9 middle_mcp
+    { x: 0.45, y: 0.27, z: 0 }, // 10 middle_pip
+    { x: 0.45, y: 0.28, z: 0 }, // 11 middle_dip
+    { x: 0.52, y: 0.25, z: 0 }, // 12 middle_tip
+    { x: 0.53, y: 0.26, z: 0 }, // 13 ring_mcp
+    { x: 0.53, y: 0.27, z: 0 }, // 14 ring_pip
+    { x: 0.53, y: 0.28, z: 0 }, // 15 ring_dip
+    { x: 0.6, y: 0.25, z: 0 }, // 16 ring_tip
+    { x: 0.61, y: 0.26, z: 0 }, // 17 pinky_mcp
+    { x: 0.61, y: 0.27, z: 0 }, // 18 pinky_pip
+    { x: 0.61, y: 0.28, z: 0 }, // 19 pinky_dip
+    { x: 0.66, y: 0.25, z: 0 }, // 20 pinky_tip
   ],
   family: [
-    { x: 0.5, y: 0.5, z: 0 },    // 0  wrist
-    { x: 0.6, y: 0.4, z: 0 },    // 1  thumb mcp
-    { x: 0.7, y: 0.35, z: 0 },   // 2  thumb ip
-    { x: 0.8, y: 0.35, z: 0 },   // 3  thumb tip — extended
-    { x: 0.45, y: 0.4, z: 0 },   // 4  index mcp
-    { x: 0.45, y: 0.3, z: 0 },   // 5  index pip
-    { x: 0.45, y: 0.25, z: 0 },  // 6  index dip
-    { x: 0.45, y: 0.2, z: 0 },   // 7  index tip — extended
-    { x: 0.55, y: 0.4, z: 0 },   // 8  middle mcp
-    { x: 0.55, y: 0.28, z: 0 },  // 9  middle pip
-    { x: 0.55, y: 0.2, z: 0 },   // 10 middle tip — extended
-    { x: 0.65, y: 0.4, z: 0 },   // 11 ring mcp
-    { x: 0.65, y: 0.3, z: 0 },   // 12 ring pip
-    { x: 0.65, y: 0.22, z: 0 },  // 13 ring dip
-    { x: 0.65, y: 0.18, z: 0 },  // 14 ring tip — extended
-    { x: 0.75, y: 0.4, z: 0 },   // 15 pinky mcp
-    { x: 0.75, y: 0.32, z: 0 },  // 16 pinky pip
-    { x: 0.75, y: 0.27, z: 0 },  // 17 pinky dip
-    { x: 0.75, y: 0.23, z: 0 },  // 18 pinky tip — extended
-    { x: 0.55, y: 0.42, z: 0 },  // 19 thumb ip2
-    { x: 0.5, y: 0.5, z: 0 },    // 20 pinky tip2
+    { x: 0.5, y: 0.5, z: 0 }, // 0 wrist
+    { x: 0.42, y: 0.47, z: 0 }, // 1 thumb_cmc
+    { x: 0.4, y: 0.44, z: 0 }, // 2 thumb_mcp
+    { x: 0.38, y: 0.41, z: 0 }, // 3 thumb_ip
+    { x: 0.36, y: 0.38, z: 0 }, // 4 thumb_tip
+    { x: 0.44, y: 0.42, z: 0 }, // 5 index_mcp
+    { x: 0.43, y: 0.34, z: 0 }, // 6 index_pip
+    { x: 0.42, y: 0.28, z: 0 }, // 7 index_dip
+    { x: 0.41, y: 0.22, z: 0 }, // 8 index_tip
+    { x: 0.52, y: 0.44, z: 0 }, // 9 middle_mcp
+    { x: 0.51, y: 0.36, z: 0 }, // 10 middle_pip
+    { x: 0.505, y: 0.31, z: 0 }, // 11 middle_dip
+    { x: 0.5, y: 0.26, z: 0 }, // 12 middle_tip
+    { x: 0.6, y: 0.46, z: 0 }, // 13 ring_mcp
+    { x: 0.59, y: 0.42, z: 0 }, // 14 ring_pip
+    { x: 0.58, y: 0.39, z: 0 }, // 15 ring_dip
+    { x: 0.57, y: 0.36, z: 0 }, // 16 ring_tip
+    { x: 0.68, y: 0.48, z: 0 }, // 17 pinky_mcp
+    { x: 0.67, y: 0.44, z: 0 }, // 18 pinky_pip
+    { x: 0.66, y: 0.41, z: 0 }, // 19 pinky_dip
+    { x: 0.65, y: 0.38, z: 0 }, // 20 pinky_tip
   ],
   mother: [
-    { x: 0.5, y: 0.5, z: 0 },    // 0  wrist
-    { x: 0.5, y: 0.4, z: 0 },    // 1  thumb mcp — resting
-    { x: 0.5, y: 0.38, z: 0 },   // 2  thumb ip
-    { x: 0.5, y: 0.36, z: 0 },   // 3  thumb tip — flat (tucked under)
-    { x: 0.45, y: 0.4, z: 0 },   // 4  index mcp
-    { x: 0.45, y: 0.32, z: 0 },  // 5  index pip
-    { x: 0.45, y: 0.26, z: 0 },  // 6  index dip
-    { x: 0.45, y: 0.2, z: 0 },   // 7  index tip — extended (flat hand to chin)
-    { x: 0.55, y: 0.4, z: 0 },   // 8  middle mcp
-    { x: 0.55, y: 0.32, z: 0 },  // 9  middle pip
-    { x: 0.55, y: 0.2, z: 0 },   // 10 middle tip — extended
-    { x: 0.65, y: 0.4, z: 0 },   // 11 ring mcp
-    { x: 0.65, y: 0.3, z: 0 },   // 12 ring pip
-    { x: 0.65, y: 0.25, z: 0 },  // 13 ring dip
-    { x: 0.65, y: 0.18, z: 0 },  // 14 ring tip — extended
-    { x: 0.75, y: 0.42, z: 0 },  // 15 pinky mcp
-    { x: 0.75, y: 0.34, z: 0 },  // 16 pinky pip
-    { x: 0.75, y: 0.29, z: 0 },  // 17 pinky dip
-    { x: 0.75, y: 0.23, z: 0 },  // 18 pinky tip — extended
-    { x: 0.52, y: 0.42, z: 0 },  // 19 thumb ip2
-    { x: 0.5, y: 0.5, z: 0 },    // 20 pinky tip2
+    { x: 0.5, y: 0.5, z: 0 }, // 0 wrist
+    { x: 0.42, y: 0.48, z: 0 }, // 1 thumb_cmc
+    { x: 0.4, y: 0.45, z: 0 }, // 2 thumb_mcp
+    { x: 0.38, y: 0.42, z: 0 }, // 3 thumb_ip
+    { x: 0.36, y: 0.4, z: 0 }, // 4 thumb_tip
+    { x: 0.45, y: 0.4, z: 0 }, // 5 index_mcp
+    { x: 0.45, y: 0.3, z: 0 }, // 6 index_pip
+    { x: 0.45, y: 0.25, z: 0 }, // 7 index_dip
+    { x: 0.43, y: 0.25, z: 0 }, // 8 index_tip
+    { x: 0.5, y: 0.4, z: 0 }, // 9 middle_mcp
+    { x: 0.5, y: 0.3, z: 0 }, // 10 middle_pip
+    { x: 0.5, y: 0.25, z: 0 }, // 11 middle_dip
+    { x: 0.5, y: 0.25, z: 0 }, // 12 middle_tip
+    { x: 0.56, y: 0.4, z: 0 }, // 13 ring_mcp
+    { x: 0.56, y: 0.3, z: 0 }, // 14 ring_pip
+    { x: 0.56, y: 0.25, z: 0 }, // 15 ring_dip
+    { x: 0.58, y: 0.25, z: 0 }, // 16 ring_tip
+    { x: 0.62, y: 0.4, z: 0 }, // 17 pinky_mcp
+    { x: 0.62, y: 0.3, z: 0 }, // 18 pinky_pip
+    { x: 0.62, y: 0.22999999999999998, z: 0 }, // 19 pinky_dip
+    { x: 0.66, y: 0.25, z: 0 }, // 20 pinky_tip
   ],
   father: [
-    { x: 0.5, y: 0.5, z: 0 },    // 0  wrist
-    { x: 0.5, y: 0.4, z: 0 },    // 1  thumb mcp — resting
-    { x: 0.5, y: 0.38, z: 0 },   // 2  thumb ip
-    { x: 0.5, y: 0.36, z: 0 },   // 3  thumb tip — flat (forehead position)
-    { x: 0.45, y: 0.4, z: 0 },   // 4  index mcp
-    { x: 0.45, y: 0.32, z: 0 },  // 5  index pip
-    { x: 0.45, y: 0.26, z: 0 },  // 6  index dip
-    { x: 0.45, y: 0.2, z: 0 },   // 7  index tip — extended
-    { x: 0.55, y: 0.4, z: 0 },   // 8  middle mcp
-    { x: 0.55, y: 0.32, z: 0 },  // 9  middle pip
-    { x: 0.55, y: 0.2, z: 0 },   // 10 middle tip — extended
-    { x: 0.65, y: 0.4, z: 0 },   // 11 ring mcp
-    { x: 0.65, y: 0.3, z: 0 },   // 12 ring pip
-    { x: 0.65, y: 0.25, z: 0 },  // 13 ring dip
-    { x: 0.65, y: 0.18, z: 0 },  // 14 ring tip — extended
-    { x: 0.75, y: 0.42, z: 0 },  // 15 pinky mcp
-    { x: 0.75, y: 0.34, z: 0 },  // 16 pinky pip
-    { x: 0.75, y: 0.29, z: 0 },  // 17 pinky dip
-    { x: 0.75, y: 0.23, z: 0 },  // 18 pinky tip — extended
-    { x: 0.52, y: 0.42, z: 0 },  // 19 thumb ip2
-    { x: 0.5, y: 0.5, z: 0 },    // 20 pinky tip2
+    { x: 0.5, y: 0.5, z: 0 }, // 0 wrist
+    { x: 0.4, y: 0.46, z: 0 }, // 1 thumb_cmc
+    { x: 0.38, y: 0.44, z: 0 }, // 2 thumb_mcp
+    { x: 0.36, y: 0.42, z: 0 }, // 3 thumb_ip
+    { x: 0.36, y: 0.42, z: 0 }, // 4 thumb_tip
+    { x: 0.45, y: 0.4, z: 0 }, // 5 index_mcp
+    { x: 0.45, y: 0.3, z: 0 }, // 6 index_pip
+    { x: 0.45, y: 0.25, z: 0 }, // 7 index_dip
+    { x: 0.43, y: 0.27, z: 0 }, // 8 index_tip
+    { x: 0.5, y: 0.4, z: 0 }, // 9 middle_mcp
+    { x: 0.5, y: 0.3, z: 0 }, // 10 middle_pip
+    { x: 0.5, y: 0.25, z: 0 }, // 11 middle_dip
+    { x: 0.5, y: 0.27, z: 0 }, // 12 middle_tip
+    { x: 0.56, y: 0.4, z: 0 }, // 13 ring_mcp
+    { x: 0.56, y: 0.3, z: 0 }, // 14 ring_pip
+    { x: 0.56, y: 0.25, z: 0 }, // 15 ring_dip
+    { x: 0.58, y: 0.27, z: 0 }, // 16 ring_tip
+    { x: 0.62, y: 0.4, z: 0 }, // 17 pinky_mcp
+    { x: 0.62, y: 0.3, z: 0 }, // 18 pinky_pip
+    { x: 0.62, y: 0.22999999999999998, z: 0 }, // 19 pinky_dip
+    { x: 0.66, y: 0.27, z: 0 }, // 20 pinky_tip
   ],
   eat: [
-    { x: 0.5, y: 0.5, z: 0 },    // 0  wrist
-    { x: 0.5, y: 0.45, z: 0 },   // 1  thumb mcp
-    { x: 0.5, y: 0.4, z: 0 },    // 2  thumb ip
-    { x: 0.5, y: 0.36, z: 0 },   // 3  thumb tip — slightly curled
-    { x: 0.45, y: 0.4, z: 0 },   // 4  index mcp
-    { x: 0.43, y: 0.3, z: 0 },   // 5  index pip
-    { x: 0.41, y: 0.24, z: 0 },  // 6  index dip
-    { x: 0.4, y: 0.18, z: 0 },   // 7  index tip — fingertips to mouth, slightly curled
-    { x: 0.55, y: 0.4, z: 0 },   // 8  middle mcp
-    { x: 0.54, y: 0.3, z: 0 },   // 9  middle pip
-    { x: 0.53, y: 0.25, z: 0 },  // 10 middle dip
-    { x: 0.52, y: 0.2, z: 0 },   // 11 middle tip
-    { x: 0.65, y: 0.45, z: 0 },  // 12 ring mcp
-    { x: 0.64, y: 0.35, z: 0 },  // 13 ring pip
-    { x: 0.63, y: 0.3, z: 0 },   // 14 ring dip
-    { x: 0.62, y: 0.27, z: 0 },  // 15 ring tip
-    { x: 0.75, y: 0.47, z: 0 },  // 16 pinky mcp
-    { x: 0.74, y: 0.38, z: 0 },  // 17 pinky pip
-    { x: 0.73, y: 0.32, z: 0 },  // 18 pinky dip
-    { x: 0.72, y: 0.28, z: 0 },  // 19 pinky tip
-    { x: 0.5, y: 0.5, z: 0 },    // 20 pinky tip2
+    { x: 0.5, y: 0.5, z: 0 }, // 0 wrist
+    { x: 0.6, y: 0.43, z: 0 }, // 1 thumb_cmc
+    { x: 0.65, y: 0.4, z: 0 }, // 2 thumb_mcp
+    { x: 0.7, y: 0.38, z: 0 }, // 3 thumb_ip
+    { x: 0.4, y: 0.38, z: 0 }, // 4 thumb_tip
+    { x: 0.45, y: 0.4, z: 0 }, // 5 index_mcp
+    { x: 0.45, y: 0.3, z: 0 }, // 6 index_pip
+    { x: 0.44, y: 0.2, z: 0 }, // 7 index_dip
+    { x: 0.44, y: 0.28, z: 0 }, // 8 index_tip
+    { x: 0.5, y: 0.4, z: 0 }, // 9 middle_mcp
+    { x: 0.5, y: 0.3, z: 0 }, // 10 middle_pip
+    { x: 0.5, y: 0.2, z: 0 }, // 11 middle_dip
+    { x: 0.5, y: 0.28, z: 0 }, // 12 middle_tip
+    { x: 0.56, y: 0.4, z: 0 }, // 13 ring_mcp
+    { x: 0.56, y: 0.3, z: 0 }, // 14 ring_pip
+    { x: 0.58, y: 0.2, z: 0 }, // 15 ring_dip
+    { x: 0.58, y: 0.28, z: 0 }, // 16 ring_tip
+    { x: 0.62, y: 0.4, z: 0 }, // 17 pinky_mcp
+    { x: 0.62, y: 0.3, z: 0 }, // 18 pinky_pip
+    { x: 0.66, y: 0.2, z: 0 }, // 19 pinky_dip
+    { x: 0.66, y: 0.28, z: 0 }, // 20 pinky_tip
   ],
   name: [
-    { x: 0.5, y: 0.5, z: 0 },    // 0  wrist
-    { x: 0.5, y: 0.45, z: 0 },   // 1  thumb mcp
-    { x: 0.5, y: 0.4, z: 0 },    // 2  thumb ip
-    { x: 0.5, y: 0.37, z: 0 },   // 3  thumb tip — slightly extended
-    { x: 0.45, y: 0.4, z: 0 },   // 4  index mcp
-    { x: 0.43, y: 0.32, z: 0 },  // 5  index pip
-    { x: 0.41, y: 0.26, z: 0 },  // 6  index dip
-    { x: 0.4, y: 0.22, z: 0 },   // 7  index tip — fingertips tapping chest then extending
-    { x: 0.55, y: 0.4, z: 0 },   // 8  middle mcp
-    { x: 0.54, y: 0.32, z: 0 },  // 9  middle pip
-    { x: 0.53, y: 0.26, z: 0 },  // 10 middle tip
-    { x: 0.65, y: 0.45, z: 0 },  // 11 ring mcp
-    { x: 0.64, y: 0.35, z: 0 },  // 12 ring pip
-    { x: 0.63, y: 0.3, z: 0 },   // 13 ring tip
-    { x: 0.62, y: 0.26, z: 0 },  // 14 ring tip2
-    { x: 0.75, y: 0.47, z: 0 },  // 15 pinky mcp
-    { x: 0.74, y: 0.38, z: 0 },  // 16 pinky pip
-    { x: 0.73, y: 0.32, z: 0 },  // 17 pinky dip
-    { x: 0.72, y: 0.28, z: 0 },  // 18 pinky tip
-    { x: 0.52, y: 0.42, z: 0 },  // 19 thumb ip2
-    { x: 0.5, y: 0.5, z: 0 },    // 20 pinky tip2
+    { x: 0.5, y: 0.5, z: 0 }, // 0 wrist
+    { x: 0.44, y: 0.47, z: 0 }, // 1 thumb_cmc
+    { x: 0.42, y: 0.44, z: 0 }, // 2 thumb_mcp
+    { x: 0.4, y: 0.41, z: 0 }, // 3 thumb_ip
+    { x: 0.38, y: 0.38, z: 0 }, // 4 thumb_tip
+    { x: 0.44, y: 0.42, z: 0 }, // 5 index_mcp
+    { x: 0.43, y: 0.3, z: 0 }, // 6 index_pip
+    { x: 0.42, y: 0.22, z: 0 }, // 7 index_dip
+    { x: 0.41, y: 0.15, z: 0 }, // 8 index_tip
+    { x: 0.54, y: 0.44, z: 0 }, // 9 middle_mcp
+    { x: 0.53, y: 0.4, z: 0 }, // 10 middle_pip
+    { x: 0.53, y: 0.38, z: 0 }, // 11 middle_dip
+    { x: 0.53, y: 0.36, z: 0 }, // 12 middle_tip
+    { x: 0.62, y: 0.46, z: 0 }, // 13 ring_mcp
+    { x: 0.61, y: 0.42, z: 0 }, // 14 ring_pip
+    { x: 0.61, y: 0.4, z: 0 }, // 15 ring_dip
+    { x: 0.61, y: 0.38, z: 0 }, // 16 ring_tip
+    { x: 0.7, y: 0.48, z: 0 }, // 17 pinky_mcp
+    { x: 0.69, y: 0.44, z: 0 }, // 18 pinky_pip
+    { x: 0.69, y: 0.42, z: 0 }, // 19 pinky_dip
+    { x: 0.69, y: 0.4, z: 0 }, // 20 pinky_tip
   ],
 }
 
@@ -365,7 +362,6 @@ export function normalizeLandmarks(landmarks: Landmark[]): Landmark[] {
     z: lm.z - wrist.z,
   }))
 
-  // Normalize by max distance from wrist
   const maxDist = Math.max(
     ...normalized.map((lm) => Math.sqrt(lm.x * lm.x + lm.y * lm.y + lm.z * lm.z)),
     0.001
@@ -379,8 +375,6 @@ export function normalizeLandmarks(landmarks: Landmark[]): Landmark[] {
 }
 
 // Match detected landmarks against known sign templates
-// ponytail: simple Euclidean distance matcher. Upgrade to a trained ML model
-// or dynamic time warping for temporal gesture matching.
 export function matchSign(landmarks: Landmark[]): { signId: string; confidence: number } | null {
   if (landmarks.length < 21) return null
 

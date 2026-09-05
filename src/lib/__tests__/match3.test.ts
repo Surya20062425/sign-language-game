@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { levels, createGrid, findMatches, settle, randomSign } from '../match3'
+import { levels, createGrid, findMatches, settle } from '../match3'
 import { resolveCascade, removeSign } from '../gameEngine'
 
 describe('match3 grid ops', () => {
