@@ -1,7 +1,10 @@
 import { useState, useRef, useEffect } from 'react'
 import { Camera, CameraOff, CheckCircle, XCircle, RefreshCw, Trophy, Star } from 'lucide-react'
+import { Hands, type Results, HAND_CONNECTIONS } from '@mediapipe/hands'
+import { drawConnectors, drawLandmarks } from '@mediapipe/drawing_utils'
 import { signs } from '../data'
 import { Sign } from '../data/types'
+import { matchSign } from '../data/landmarks'
 
 interface Level {
   id: number
@@ -58,52 +61,143 @@ export function Practice() {
   const [hasPermission, setHasPermission] = useState(false)
   const [cameraError, setCameraError] = useState<string | null>(null)
   const [showHint, setShowHint] = useState(false)
+  const [isModelReady, setIsModelReady] = useState(false)
+  const [detectedSign, setDetectedSign] = useState<string | null>(null)
+  const [confidence, setConfidence] = useState(0)
+
   const videoRef = useRef<HTMLVideoElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const handsRef = useRef<Hands | null>(null)
+  const animationRef = useRef<number | null>(null)
 
   const level = levels[currentLevel]
   const gridSigns: Sign[] = level.signIds.map((id) => signs[id])
 
   useEffect(() => {
     let stream: MediaStream | null = null
+    let hands: Hands | null = null
+
     const setupCamera = async () => {
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user' },
+          video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
         })
-        if (videoRef.current) videoRef.current.srcObject = stream
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream
+          videoRef.current.play()
+        }
+
         setHasPermission(true)
         setCameraError(null)
+
+        // Initialize MediaPipe Hands
+        hands = new Hands({
+          locateFile: (file: string) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/${file}`
+          },
+        })
+
+        hands.setOptions({
+          maxNumHands: 1,
+          modelComplexity: 1,
+          minDetectionConfidence: 0.7,
+          minTrackingConfidence: 0.7,
+        })
+
+        hands.onResults(onResults)
+        handsRef.current = hands
+        setIsModelReady(true)
+
+        // Start processing loop
+        const processFrame = async () => {
+          if (videoRef.current && handsRef.current && videoRef.current.readyState >= 2) {
+            await handsRef.current.send({ image: videoRef.current })
+          }
+          animationRef.current = requestAnimationFrame(processFrame)
+        }
+        processFrame()
       } catch {
         setCameraError('Camera access denied. Please allow camera permissions.')
         setHasPermission(false)
       }
     }
-    setupCamera()
-    return () => stream?.getTracks().forEach((t) => t.stop())
-  }, [])
 
-  const handleSignTap = (signId: string) => {
-    if (movesLeft <= 0 || pendingSignId !== null) return
-    setPendingSignId(signId)
-  }
+    const onResults = (results: Results) => {
+      const canvas = canvasRef.current
+      if (!canvas) return
+
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+
+      // Set canvas size to match video
+      canvas.width = videoRef.current?.videoWidth || 640
+      canvas.height = videoRef.current?.videoHeight || 480
+
+      // Clear canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+      // Draw video frame onto canvas
+      if (videoRef.current) {
+        ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height)
+      }
+
+      // Process hand landmarks
+      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        const landmarks = results.multiHandLandmarks[0]
+
+        // Draw landmarks and connections
+        drawConnectors(ctx, landmarks, HAND_CONNECTIONS, { color: '#0ea5e9', lineWidth: 2 })
+        drawLandmarks(ctx, landmarks, { color: '#ef4444', lineWidth: 1 })
+
+        // Convert to our landmark format and try to match
+        if (!pendingSignId) {
+          const ourLandmarks = landmarks.map((lm) => ({ x: lm.x, y: lm.y, z: lm.z }))
+          const match = matchSign(ourLandmarks)
+
+          if (match) {
+            setDetectedSign(match.signId)
+            setConfidence(match.confidence)
+
+            // If detected sign matches a sign in the current level, auto-select it
+            if (level.signIds.includes(match.signId)) {
+              setPendingSignId(match.signId)
+            }
+          } else {
+            setDetectedSign(null)
+            setConfidence(0)
+          }
+        }
+      } else {
+        setDetectedSign(null)
+        setConfidence(0)
+      }
+    }
+
+    setupCamera()
+
+    return () => {
+      if (animationRef.current) cancelAnimationFrame(animationRef.current)
+      if (hands) hands.close()
+      if (stream) stream.getTracks().forEach((t) => t.stop())
+    }
+  }, [pendingSignId, level.signIds])
 
   const confirmCorrect = () => {
     setScore((s) => s + 10)
     setMovesLeft((m) => m - 1)
     setPendingSignId(null)
-
-    if (movesLeft <= 1) {
-      setShowLevelComplete(true)
-    }
+    setDetectedSign(null)
+    setConfidence(0)
+    if (movesLeft <= 1) setShowLevelComplete(true)
   }
 
   const confirmWrong = () => {
     setMovesLeft((m) => m - 1)
     setPendingSignId(null)
-
-    if (movesLeft <= 1) {
-      setShowLevelComplete(true)
-    }
+    setDetectedSign(null)
+    setConfidence(0)
+    if (movesLeft <= 1) setShowLevelComplete(true)
   }
 
   const nextLevel = () => {
@@ -120,10 +214,12 @@ export function Practice() {
     setScore(0)
     setPendingSignId(null)
     setShowLevelComplete(false)
+    setDetectedSign(null)
+    setConfidence(0)
   }
 
   const starsEarned = movesLeft >= 2 ? 3 : movesLeft >= 1 ? 2 : 1
-  const levelSign = gridSigns[0]
+  const targetSign = gridSigns[0]
 
   return (
     <div className="space-y-6">
@@ -135,28 +231,52 @@ export function Practice() {
             Level {currentLevel + 1}: <span className="font-medium">{level.title}</span>
           </p>
         </div>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-1">
-            <Star className="w-5 h-5 text-yellow-400 fill-current" />
-            <span className="font-bold text-gray-900">{score}</span>
-          </div>
-          <div className="flex items-center gap-4 text-sm">
-            <span className="font-medium">Moves: {movesLeft}</span>
-            <span className="font-medium">Stars: {starsEarned}/3</span>
-          </div>
+        <div className="flex items-center gap-4 text-sm">
+          <span className="font-medium">Score: {score}</span>
+          <span className="font-medium">Moves: {movesLeft}</span>
+          <span className="font-medium">Stars: {starsEarned}/3</span>
         </div>
       </div>
 
-      {/* Game Board */}
+      {/* Detection Status */}
+      {isModelReady && (
+        <div className="card">
+          <div className="flex justify-between items-center">
+            <div>
+              <span className="font-medium text-gray-700">AI Detection:</span>
+              {detectedSign ? (
+                <span className="text-primary-600 font-bold"> {signs[detectedSign]?.word || detectedSign}</span>
+              ) : (
+                <span className="text-gray-500"> No hand detected</span>
+              )}
+            </div>
+            {detectedSign && confidence > 0 && (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-600">Confidence: {Math.round(confidence * 100)}%</span>
+                <div className="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary-600 transition-all duration-300"
+                    style={{ width: `${Math.round(confidence * 100)}%` }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Game Board - Grid of signs */}
       <div className="grid grid-cols-3 gap-4 max-w-2xl mx-auto">
-        {gridSigns.map((sign) => (
+        {gridSigns.map((sign: Sign) => (
           <button
             key={sign.id}
-            onClick={() => handleSignTap(sign.id)}
+            onClick={() => !pendingSignId && movesLeft > 0 && setPendingSignId(sign.id)}
             disabled={movesLeft <= 0 || pendingSignId !== null}
             className={`relative aspect-square rounded-2xl border-4 transition-all duration-300 ${
               pendingSignId === sign.id
                 ? 'border-yellow-400 bg-yellow-50 scale-105'
+                : detectedSign === sign.id
+                ? 'border-green-400 bg-green-50 scale-105 animate-pulse'
                 : movesLeft <= 0 || pendingSignId !== null
                 ? 'border-gray-200 bg-gray-50 cursor-not-allowed opacity-50'
                 : 'border-primary-200 bg-white hover:border-primary-400 hover:bg-primary-50 hover:scale-105'
@@ -179,50 +299,42 @@ export function Practice() {
                 )}
               </div>
               <span className="text-lg font-semibold text-gray-800">{sign.word}</span>
+              {detectedSign === sign.id && (
+                <CheckCircle className="w-5 h-5 text-green-500 absolute top-1 right-1" />
+              )}
             </div>
-            {sign.id === 'hello' && (
-              <div className="absolute -top-2 -right-2 w-6 h-6 bg-green-400 rounded-full flex items-center justify-center">
-                <CheckCircle className="w-4 h-4 text-white" />
-              </div>
-            )}
           </button>
         ))}
       </div>
 
-      {/* Webcam + Target Sign */}
-      <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
-        {/* Target Sign */}
+      {/* Webcam + Reference */}
+      <div className="grid md:grid-cols-2 gap-8">
+        {/* Reference Sign */}
         <div className="card text-center">
           <h3 className="font-semibold text-gray-700 mb-4">Mimic This Sign</h3>
-          <div className="bg-gray-100 rounded-xl p-6 min-h-[200px] flex items-center justify-center">
-            {levelSign.image ? (
+          <div className="bg-gray-100 rounded-xl p-6 min-h-[240px] flex items-center justify-center">
+            {targetSign?.image ? (
               <img
-                src={levelSign.image}
-                alt={levelSign.word}
+                src={targetSign.image}
+                alt={targetSign.word}
                 className="max-w-full max-h-[200px] object-contain"
                 onError={(e) => {
                   const target = e.target as HTMLImageElement
-                  target.src = `https://placehold.co/240x240/e0f2fe/0ea5e9?text=${encodeURIComponent(levelSign.word)}`
+                  target.src = `https://placehold.co/240x240/e0f2fe/0ea5e9?text=${encodeURIComponent(targetSign.word)}`
                 }}
               />
             ) : (
               <div className="text-center">
                 <div className="text-6xl mb-2">🤟</div>
-                <span className="text-gray-500">{levelSign.word}</span>
+                <span className="text-gray-500">{targetSign?.word}</span>
               </div>
             )}
           </div>
           {showHint && (
             <div className="mt-4 text-left bg-primary-50 p-3 rounded-xl">
-              <p className="text-sm text-primary-800">
-                <strong>Handshape:</strong> {levelSign.handshape}
-              </p>
-              <p className="text-sm text-primary-800">
-                <strong>Movement:</strong> {levelSign.movement}
-              </p>
-              <p className="text-sm text-primary-800">
-                <strong>Location:</strong> {levelSign.location}
-              </p>
+              <p className="text-sm text-primary-800"><strong>Handshape:</strong> {targetSign?.handshape}</p>
+              <p className="text-sm text-primary-800"><strong>Movement:</strong> {targetSign?.movement}</p>
+              <p className="text-sm text-primary-800"><strong>Location:</strong> {targetSign?.location}</p>
             </div>
           )}
           <button
@@ -233,7 +345,7 @@ export function Practice() {
           </button>
         </div>
 
-        {/* Webcam */}
+        {/* Webcam with overlay */}
         <div className="card">
           <h3 className="font-semibold text-gray-700 mb-4">Your Camera</h3>
           {hasPermission ? (
@@ -245,6 +357,15 @@ export function Practice() {
                 muted
                 className="w-full h-[240px] object-cover rounded-xl bg-black mirror"
               />
+              <canvas
+                ref={canvasRef}
+                className="absolute inset-0 w-full h-full pointer-events-none"
+              />
+              {!isModelReady && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-xl text-white">
+                  Loading AI model...
+                </div>
+              )}
               <div className="absolute bottom-2 left-2 bg-green-500 text-white text-xs px-2 py-1 rounded-full">
                 Live
               </div>
@@ -255,7 +376,9 @@ export function Practice() {
               <p className="text-gray-600 mb-4">{cameraError}</p>
               <button
                 onClick={async () => {
-                  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } })
+                  const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+                  })
                   if (videoRef.current) videoRef.current.srcObject = stream
                   setHasPermission(true)
                   setCameraError(null)
@@ -276,7 +399,7 @@ export function Practice() {
           {pendingSignId && (
             <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-xl">
               <p className="text-yellow-800 font-medium text-center">
-                Sign matched: "{signs[pendingSignId]?.word}"
+                Detected: "{signs[pendingSignId]?.word}"
               </p>
               <div className="flex justify-center gap-3 mt-3">
                 <button
@@ -295,12 +418,6 @@ export function Practice() {
                 </button>
               </div>
             </div>
-          )}
-
-          {!pendingSignId && movesLeft > 0 && hasPermission && (
-            <p className="mt-4 text-xs text-gray-500 text-center">
-              Tap a sign on the board, then check your webcam to compare your hand position.
-            </p>
           )}
         </div>
       </div>
