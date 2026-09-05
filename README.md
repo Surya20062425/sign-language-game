@@ -14,7 +14,7 @@ Open [http://localhost:3000](http://localhost:3000) to start learning.
 ## Features
 
 - **Guided lessons** — Step-by-step ASL signs for common words
-- **Practice mode** — Webcam-based gesture practice
+- **Practice mode** — Candy Crush-style grid game with webcam gesture recognition
 - **Quizzes** — Test your knowledge with quick flashcards
 - **Progress tracking** — Visual progress and achievements
 - **Mobile-first** — Works on desktop and mobile
@@ -24,9 +24,10 @@ Open [http://localhost:3000](http://localhost:3000) to start learning.
 
 - React 19 + TypeScript
 - Vite
-- Tailwind CSS 4
+- Tailwind CSS 3
 - Framer Motion
 - React Router 7
+- MediaPipe Hands (CDN-loaded, client-side ML)
 - Lucide React
 
 ## Project Structure
